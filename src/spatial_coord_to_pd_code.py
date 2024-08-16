@@ -15,10 +15,6 @@ def __build_knot_pdcode(): # 重新构建可执行文件
     ret = subprocess.run(["bash", BUILD_SCRIPT])
     return ret.returncode
 
-if not os.path.isfile(KNOT_PDCODE): # 可执行文件不存在，则重新构建
-    __build_knot_pdcode()
-    assert os.path.isfile(KNOT_PDCODE) # 构建后，knot-pdcode 必须存在
-
 def __grant_exec(): # 给指定的可执行文件赋予可执行权限
     ret = subprocess.run(["chmod", "+x", KNOT_PDCODE])
     return ret.returncode
@@ -39,6 +35,9 @@ def __gen_text_spatial_data(spatial_coord): # 生成文本形式的 knot-pdcode 
     return fontline + ("\n".join(nextlines)) + "\n"   # 连接
 
 def spatial_coord_to_pd_code(spatial_coord: list[list]) -> list: # 将空间数据转化为 PD_CODE
+    if not os.path.isfile(KNOT_PDCODE): # 可执行文件不存在，则重新构建
+        __build_knot_pdcode()
+        assert os.path.isfile(KNOT_PDCODE) # 构建后，knot-pdcode 必须存在
     __coord_check(spatial_coord)
     __grant_exec()
     txt_spatial_data = __gen_text_spatial_data(spatial_coord)
