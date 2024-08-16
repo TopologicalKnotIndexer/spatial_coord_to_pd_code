@@ -6,10 +6,18 @@
 import os
 import subprocess
 import sys
-DIRNOW      = os.path.dirname(os.path.abspath(__file__))
-KNOT_PDCODE = os.path.join(DIRNOW, "knot-pdcode")
-SAMPLE_DATA = os.path.join(DIRNOW, "sample_data.txt") # 用于测试的样例数据
-assert os.path.isfile(KNOT_PDCODE)
+DIRNOW       = os.path.dirname(os.path.abspath(__file__))
+KNOT_PDCODE  = os.path.join(DIRNOW, "knot-pdcode")
+BUILD_SCRIPT = os.path.join(DIRNOW, "build_knot-pdcode.sh") # 其中会使用 g++ 构建 knot-pdcode
+SAMPLE_DATA  = os.path.join(DIRNOW, "sample_data.txt")      # 用于测试的样例数据
+
+def __build_knot_pdcode(): # 重新构建可执行文件
+    ret = subprocess.run(["bash", BUILD_SCRIPT])
+    return ret.returncode
+
+if not os.path.isfile(KNOT_PDCODE): # 可执行文件不存在，则重新构建
+    __build_knot_pdcode()
+    assert os.path.isfile(KNOT_PDCODE) # 构建后，knot-pdcode 必须存在
 
 def __grant_exec(): # 给指定的可执行文件赋予可执行权限
     ret = subprocess.run(["chmod", "+x", KNOT_PDCODE])
