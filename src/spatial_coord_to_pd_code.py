@@ -1,67 +1,116 @@
-# 给定空间中的坐标序列
-# 计算对应扭结的 PD_CODE
-# 我们直接从 knot-indexer 项目中复用一个二进制文件 knot-pdcode 过来（反正是我自己写的）
-# 不出问题就先凑合用着，出了问题再说
+"""Convert a closed spatial polygon to a PD code with the bundled C++ engine."""
 
+from ast import literal_eval
+from collections import Counter
+from pathlib import Path
+import math
 import os
+import shutil
+import stat
 import subprocess
-import sys
-DIRNOW       = os.path.dirname(os.path.abspath(__file__))
-KNOT_PDCODE  = os.path.join(DIRNOW, "knot-pdcode")
-BUILD_SCRIPT = os.path.join(DIRNOW, "build_knot-pdcode.sh") # 其中会使用 g++ 构建 knot-pdcode
-SAMPLE_DATA  = os.path.join(DIRNOW, "sample_data.txt")      # 用于测试的样例数据
 
-def __build_knot_pdcode(): # 重新构建可执行文件
-    ret = subprocess.run(["bash", BUILD_SCRIPT])
-    return ret.returncode
 
-def __grant_exec(): # 给指定的可执行文件赋予可执行权限
-    ret = subprocess.run(["chmod", "+x", KNOT_PDCODE])
-    return ret.returncode
+HERE = Path(__file__).resolve().parent
+SOURCE = HERE / "knot-pdcode_src" / "main.cpp"
+EXECUTABLE = HERE / ("knot-pdcode.exe" if os.name == "nt" else "knot-pdcode")
+SAMPLE_DATA = HERE / "sample_data.txt"
 
-def __coord_check(spatial_coord: list[list]): # 检查输入的坐标序列是否合法
-    assert isinstance(spatial_coord, list)
-    for node in spatial_coord:
-        assert isinstance(node, list)
-        assert len(node) == 3 # 必须是三维坐标序列
-        for x in node:
-            assert type(x) in [int, float] # 必须是整数或者浮点数坐标
 
-def __gen_text_spatial_data(spatial_coord): # 生成文本形式的 knot-pdcode 的输入数据
-    fontline  = "%d\n" % len(spatial_coord)  # 第一行包含采样点的总个数
-    nextlines = []
-    for coord in spatial_coord:
-        nextlines.append("%.20f %.20f %.20f" % tuple(coord)) # 把坐标写成字符串写入文件
-    return fontline + ("\n".join(nextlines)) + "\n"   # 连接
+def _compiler() -> str:
+    requested = os.environ.get("CXX", "g++")
+    resolved = shutil.which(requested)
+    if resolved:
+        return resolved
+    path = Path(requested)
+    if path.is_file():
+        return str(path.resolve())
+    raise FileNotFoundError("a C++17 compiler was not found; set CXX or install g++")
 
-def spatial_coord_to_pd_code(spatial_coord: list[list]) -> list: # 将空间数据转化为 PD_CODE
-    if not os.path.isfile(KNOT_PDCODE): # 可执行文件不存在，则重新构建
-        __build_knot_pdcode()
-        assert os.path.isfile(KNOT_PDCODE) # 构建后，knot-pdcode 必须存在
-    __coord_check(spatial_coord)
-    __grant_exec()
-    txt_spatial_data = __gen_text_spatial_data(spatial_coord)
-    pfile = subprocess.Popen([KNOT_PDCODE],
-                            stdin=subprocess.PIPE, # 直接使用程序控制 stdin 即可
-                            stdout=subprocess.PIPE,
-                            stderr=subprocess.PIPE)
-    stdout_ans, stderr_ans = pfile.communicate(txt_spatial_data.encode())
-    returncode = pfile.returncode
-    if returncode != 0:  # 不能允许出错的情况发生
-        sys.stderr.write(stderr_ans.decode())
-        assert False
-    return eval(stdout_ans.decode()) # 此处应该赶回一个 list of list 作为 PD_CODE
 
-def __get_sample_data(): # 从样例数据中获取采样点空间坐标序列
-    assert os.path.isfile(SAMPLE_DATA)
-    arr = []
-    for line in open(SAMPLE_DATA):
-        line = line.strip()
-        if line == "" or line[0] == "#": # 忽略空行以及井号开头的行
-            continue
-        arr.append(list(map(float, line.split())))
-    return arr
+def _build_engine() -> None:
+    result = subprocess.run(
+        [_compiler(), "-std=c++17", "-O2", "-o", str(EXECUTABLE), str(SOURCE)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0 or not EXECUTABLE.is_file():
+        raise RuntimeError(f"could not build knot-pdcode:\n{result.stderr}")
 
-if __name__ == "__main__": # 测试
-    coord_data = __get_sample_data()
-    print(spatial_coord_to_pd_code(coord_data))
+
+def _validate_coordinates(spatial_coord: list[list[float]]) -> None:
+    if not isinstance(spatial_coord, list):
+        raise TypeError("spatial_coord must be a list")
+    for point in spatial_coord:
+        if not isinstance(point, list) or len(point) != 3:
+            raise ValueError("every point must be a three-item list")
+        for coordinate in point:
+            if isinstance(coordinate, bool) or not isinstance(coordinate, (int, float)):
+                raise TypeError("coordinates must be finite integers or floats")
+            if not math.isfinite(coordinate):
+                raise ValueError("coordinates must be finite")
+
+
+def _serialize_coordinates(spatial_coord: list[list[float]]) -> str:
+    lines = [str(len(spatial_coord))]
+    lines.extend("%.20f %.20f %.20f" % tuple(point) for point in spatial_coord)
+    return "\n".join(lines) + "\n"
+
+
+def _validate_pd_output(value: object) -> list[list[int]]:
+    if not isinstance(value, list):
+        raise ValueError("the C++ engine did not return a list")
+    labels: list[int] = []
+    for crossing in value:
+        if not isinstance(crossing, list) or len(crossing) != 4:
+            raise ValueError("the C++ engine returned a malformed crossing")
+        for label in crossing:
+            if isinstance(label, bool) or not isinstance(label, int):
+                raise ValueError("the C++ engine returned a non-integer label")
+            labels.append(label)
+    if any(count != 2 for count in Counter(labels).values()):
+        raise ValueError("the C++ engine returned labels that do not occur twice")
+    return value
+
+
+def spatial_coord_to_pd_code(spatial_coord: list[list[float]]) -> list[list[int]]:
+    """Project a closed polygon and return the smallest PD code found."""
+
+    _validate_coordinates(spatial_coord)
+    if not EXECUTABLE.is_file():
+        _build_engine()
+    if os.name != "nt":
+        EXECUTABLE.chmod(EXECUTABLE.stat().st_mode | stat.S_IXUSR)
+
+    result = subprocess.run(
+        [str(EXECUTABLE)],
+        input=_serialize_coordinates(spatial_coord),
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"knot-pdcode failed with exit code {result.returncode}:\n{result.stderr}")
+    try:
+        parsed = literal_eval(result.stdout.strip())
+    except (SyntaxError, ValueError) as exc:
+        raise ValueError(f"knot-pdcode returned invalid output: {result.stdout!r}") from exc
+    return _validate_pd_output(parsed)
+
+
+def _get_sample_data() -> list[list[float]]:
+    points: list[list[float]] = []
+    for line in SAMPLE_DATA.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            points.append([float(value) for value in stripped.split()])
+    _validate_coordinates(points)
+    return points
+
+
+if __name__ == "__main__":
+    print(spatial_coord_to_pd_code(_get_sample_data()))

@@ -32,7 +32,7 @@ void test() {
     printf("%25.17lf %25.17lf\n", t1, t2);
 }
 
-long long mysqr(int x) { // 计算平房数
+long long mysqr(long long x) { // Square without overflowing at 32-bit integer sizes.
     return x * x;
 }
 
@@ -58,8 +58,9 @@ int main(int argc, char **argv) {
     auto raw_input_data = input_data;           // 存档原始数据，每次重新拷贝这一输入
 
     // 控制次数
-    int MAXT = std::max(1ll, (long long)(1e7) / mysqr(raw_input_data.point_list.size()));
-    for(int t = MAXT; (t >= 0 || pd_code_list_ans.raw_pd_code_list.size() == 0); t -= 1) {
+    const long long MAX_ATTEMPTS =
+        std::max(1ll, (long long)(1e7) / mysqr((long long)raw_input_data.point_list.size())) + 1;
+    for(long long attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) {
         if(input_data.point_list.size() <= 3) { // 小于等于三个点只可能构成平凡结
             printf("[]\n");
             return 0;
@@ -85,6 +86,11 @@ int main(int argc, char **argv) {
         if(pd_code_list_ans.raw_pd_code_list.size() == 0 || pd_code_list.raw_pd_code_list.size() < pd_code_list_ans.raw_pd_code_list.size()) {
             pd_code_list_ans = pd_code_list;
         }
+    }
+
+    if(pd_code_list_ans.raw_pd_code_list.size() == 0) {
+        fprintf(stderr, "ERROR: no regular projection found after %lld attempts.\n", MAX_ATTEMPTS);
+        return 1;
     }
 
     //fprintf(stderr, "[DEBUG] pd_Code: len = %d\n", (int)pd_code_list_ans.raw_pd_code_list.size());
