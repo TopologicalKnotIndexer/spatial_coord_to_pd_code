@@ -50,3 +50,16 @@ python src/spatial_coord_to_pd_code.py
 
 The build uses only files committed in this repository.
 
+## Citation
+
+If you use this repository in academic work, please cite it as:
+
+```bibtex
+@software{topologicalknotindexer_spatial_coord_to_pd_code,
+  author = {{TopologicalKnotIndexer contributors}},
+  title = {{spatial\_coord\_to\_pd\_code}},
+  year = {2026},
+  url = {https://github.com/TopologicalKnotIndexer/spatial_coord_to_pd_code}
+}
+```
+
